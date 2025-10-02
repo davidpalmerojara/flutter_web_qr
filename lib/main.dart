@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -25,9 +26,16 @@ class QRScannerPage extends StatefulWidget {
 
 class _QRScannerPageState extends State<QRScannerPage>
     with SingleTickerProviderStateMixin {
-  final MobileScannerController cameraController = MobileScannerController();
+  final MobileScannerController cameraController = MobileScannerController(
+    facing: CameraFacing.back,
+    torchEnabled: false,
+  );
+
   bool _scanned = false;
   String? scannedCode;
+
+  // Estado del flash (solo móvil)
+  bool _torchOn = false;
 
   // Animación de la línea de escaneo
   late final AnimationController _lineController;
@@ -51,72 +59,67 @@ class _QRScannerPageState extends State<QRScannerPage>
     );
   }
 
-  void _showAlert(String code) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Código QR detectado'),
-        content: SelectableText(code), // Seleccionable
-        actions: [
-          if (_isLikelyUrl(code))
-            TextButton(
-              onPressed: () => _launchURL(code),
-              child: const Text('Abrir enlace'),
-            ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              setState(() {
-                _scanned = false; // Permite escanear de nuevo
-              });
-            },
-            child: const Text('Cerrar'),
-          ),
-        ],
-      ),
-    );
-  }
-
+  // === Helpers URL (solo se usa en el modal) ===
   bool _isLikelyUrl(String text) {
-    // Acepta URLs con o sin esquema y dominios tipo www., dominio.tld, etc.
-    final hasScheme = text.startsWith(RegExp(r'(?i)https?://'));
-    final domainLike = RegExp(
-      r'(?i)^(https?://)?([a-z0-9-]+\.)+[a-z]{2,}(/.*)?$',
-    ).hasMatch(text.trim());
-    return hasScheme || domainLike;
+    final t = text.trim();
+    final hasScheme = t.startsWith(RegExp(r'(?i)https?://'));
+    final looksDomain =
+        RegExp(r'(?i)^([a-z0-9-]+\.)+[a-z]{2,}(/.*)?$').hasMatch(t);
+    final startsWithWww = t.startsWith(RegExp(r'(?i)^www\.'));
+    return hasScheme || looksDomain || startsWithWww;
   }
 
   String _normalizeUrl(String text) {
     final t = text.trim();
     if (t.startsWith(RegExp(r'(?i)https?://'))) return t;
-    // Si parece dominio, añadimos https:// por defecto
+    if (t.startsWith(RegExp(r'(?i)^www\.'))) return 'https://$t';
     if (RegExp(r'(?i)^([a-z0-9-]+\.)+[a-z]{2,}(/.*)?$').hasMatch(t)) {
-      return 'https://$t';
-    }
-    // Si empieza por www., añadimos https://
-    if (t.startsWith(RegExp(r'(?i)^www\.'))) {
       return 'https://$t';
     }
     return t;
   }
 
-  Future<void> _launchURL(String raw) async {
-    final url = _normalizeUrl(raw);
-    final uri = Uri.tryParse(url);
-    if (uri == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Enlace no válido')),
+  Future<void> _openUrl(String raw) async {
+    final uri = Uri.tryParse(_normalizeUrl(raw));
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.platformDefault);
+  }
+
+  // === Modal: SOLO muestra enlace clickable si es URL; si no, texto normal ===
+  void _showAlert(String code) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) {
+        final isUrl = _isLikelyUrl(code);
+        final display = isUrl ? _normalizeUrl(code) : code;
+
+        return AlertDialog(
+          title: const Text('Código QR detectado'),
+          content: isUrl
+              ? InkWell(
+                  onTap: () => _openUrl(code),
+                  child: Text(
+                    display,
+                    style: const TextStyle(
+                      color: Colors.blue,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                )
+              : SelectableText(code),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                setState(() => _scanned = false); // permitir re-escanear
+              },
+              child: const Text('Cerrar'),
+            ),
+          ],
         );
-      }
-      return;
-    }
-    final ok = await launchUrl(uri, mode: LaunchMode.platformDefault);
-    if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo abrir: $url')),
-      );
-    }
+      },
+    );
   }
 
   @override
@@ -130,14 +133,31 @@ class _QRScannerPageState extends State<QRScannerPage>
           IconButton(
             icon: const Icon(Icons.flip_camera_ios),
             tooltip: 'Cambiar cámara',
-            onPressed: () => cameraController.switchCamera(),
-          ),
-          IconButton(
-            icon: const Icon(Icons.flash_on),
-            tooltip: 'Flash',
             onPressed: () async {
-              await cameraController.toggleTorch();
+              await cameraController.switchCamera();
+              if (!mounted) return;
+              setState(() => _torchOn = false); // reset del icono al cambiar
             },
+          ),
+          // Botón de flash (en Web queda desactivado)
+          IconButton(
+            tooltip: kIsWeb ? 'Flash no soportado en Web' : 'Flash',
+            icon: Icon(_torchOn ? Icons.flash_on : Icons.flash_off),
+            onPressed: kIsWeb
+                ? null
+                : () async {
+                    try {
+                      await cameraController.toggleTorch();
+                      if (!mounted) return;
+                      setState(() => _torchOn = !_torchOn);
+                    } catch (e) {
+                      if (!mounted) return;
+                      setState(() => _torchOn = false);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('No se pudo activar el flash: $e')),
+                      );
+                    }
+                  },
           ),
         ],
       ),
@@ -161,6 +181,7 @@ class _QRScannerPageState extends State<QRScannerPage>
                         _scanned = true;
                         scannedCode = code;
                       });
+                      // NO abrimos la URL aquí. Solo mostramos el modal (evita pantalla gris).
                       _showAlert(code);
                     }
                   },
@@ -186,7 +207,7 @@ class _QRScannerPageState extends State<QRScannerPage>
                     child: AnimatedBuilder(
                       animation: _lineAnimation,
                       builder: (context, child) {
-                        final y = (_frameSize - 4) * _lineAnimation.value; // 4=alto de línea
+                        final y = (_frameSize - 4) * _lineAnimation.value; // 4px alto línea
                         return Stack(
                           children: [
                             Positioned(
@@ -234,32 +255,17 @@ class _QRScannerPageState extends State<QRScannerPage>
               ],
             ),
           ),
+          // Pie informativo (NO clickable; solo info)
           Expanded(
             flex: 1,
             child: Center(
-              child: scannedCode != null
-                  ? _isLikelyUrl(scannedCode!)
-                      ? InkWell(
-                          onTap: () => _launchURL(scannedCode!),
-                          child: Text(
-                            _normalizeUrl(scannedCode!),
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              color: Colors.blue,
-                              decoration: TextDecoration.underline,
-                            ),
-                          ),
-                        )
-                      : Text(
-                          'Código detectado: $scannedCode',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(fontSize: 18),
-                        )
-                  : const Text(
-                      'Escanea un código QR',
-                      style: TextStyle(fontSize: 18),
-                    ),
+              child: Text(
+                scannedCode != null
+                    ? 'Código detectado: $scannedCode'
+                    : 'Escanea un código QR',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 18),
+              ),
             ),
           ),
         ],
