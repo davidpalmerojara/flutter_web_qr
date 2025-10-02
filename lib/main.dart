@@ -1,89 +1,104 @@
 import 'package:flutter/material.dart';
-import 'package:qr_code_scanner_plus/qr_code_scanner_plus.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
-void main() => runApp(MyApp());
+void main() => runApp(const MyApp());
 
 class MyApp extends StatelessWidget {
+  const MyApp({super.key});
   @override
-  Widget build(BuildContext context) => MaterialApp(home: QRViewExample());
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Lector QR',
+      theme: ThemeData(primarySwatch: Colors.blue),
+      home: const QRScannerPage(),
+    );
+  }
 }
 
-class QRViewExample extends StatefulWidget {
+class QRScannerPage extends StatefulWidget {
+  const QRScannerPage({super.key});
+
   @override
-  State<StatefulWidget> createState() => _QRViewExampleState();
+  State<QRScannerPage> createState() => _QRScannerPageState();
 }
 
-class _QRViewExampleState extends State<QRViewExample> {
-  final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
-  QRViewController? controller;
-  String? qrText;
+class _QRScannerPageState extends State<QRScannerPage> {
+  final MobileScannerController cameraController = MobileScannerController();
+  bool _scanned = false;
+  String? scannedCode;
+
+  void _showAlert(String code) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Código QR detectado'),
+        content: Text(code),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              setState(() {
+                _scanned = false; // Permite escanear de nuevo
+              });
+            },
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Lector QR Web')),
+      appBar: AppBar(
+        title: const Text('Lector QR Web (mobile_scanner)'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.flip_camera_ios),
+            onPressed: () => cameraController.switchCamera(),
+          ),
+        ],
+      ),
       body: Column(
-        children: <Widget>[
+        children: [
           Expanded(
             flex: 4,
-            child: QRView(
-              key: qrKey,
-              onQRViewCreated: _onQRViewCreated,
-              overlay: QrScannerOverlayShape(
-                borderColor: Colors.blue,
-                borderRadius: 10,
-                borderLength: 30,
-                borderWidth: 10,
-                cutOutSize: 250,
-              ),
+            child: MobileScanner(
+              controller: cameraController,
+              onDetect: (capture) {
+                final List<Barcode> barcodes = capture.barcodes;
+                final String? code = barcodes.isNotEmpty ? barcodes.first.rawValue : null;
+
+                if (!_scanned && code != null) {
+                  setState(() {
+                    _scanned = true;
+                    scannedCode = code;
+                  });
+                  _showAlert(code);
+                }
+              },
             ),
           ),
           Expanded(
             flex: 1,
             child: Center(
               child: Text(
-                qrText != null ? 'Código detectado: $qrText' : 'Escanea un código QR',
-                style: TextStyle(fontSize: 18),
+                scannedCode != null
+                    ? 'Código detectado: $scannedCode'
+                    : 'Escanea un código QR',
+                style: const TextStyle(fontSize: 18),
               ),
             ),
-          )
+          ),
         ],
       ),
     );
   }
 
-  void _onQRViewCreated(QRViewController controller) {
-  this.controller = controller;
-  controller.scannedDataStream.listen((scanData) {
-    final code = scanData.code;
-    if (code != null && qrText != code) {
-      setState(() {
-        qrText = code;
-      });
-      // Mostrar alerta con la URL o código leído
-      showDialog(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: Text('Código QR detectado'),
-          content: Text(code),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: Text('Cerrar'),
-            ),
-          ],
-        ),
-      );
-    }
-  });
-}
-
-
   @override
   void dispose() {
-    controller?.dispose();
+    cameraController.dispose();
     super.dispose();
   }
 }
