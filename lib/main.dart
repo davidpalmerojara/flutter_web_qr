@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 void main() => runApp(const MyApp());
 
@@ -55,8 +56,13 @@ class _QRScannerPageState extends State<QRScannerPage>
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Código QR detectado'),
-        content: Text(code),
+        content: SelectableText(code), // Seleccionable
         actions: [
+          if (_isLikelyUrl(code))
+            TextButton(
+              onPressed: () => _launchURL(code),
+              child: const Text('Abrir enlace'),
+            ),
           TextButton(
             onPressed: () {
               Navigator.of(context).pop();
@@ -69,6 +75,48 @@ class _QRScannerPageState extends State<QRScannerPage>
         ],
       ),
     );
+  }
+
+  bool _isLikelyUrl(String text) {
+    // Acepta URLs con o sin esquema y dominios tipo www., dominio.tld, etc.
+    final hasScheme = text.startsWith(RegExp(r'(?i)https?://'));
+    final domainLike = RegExp(
+      r'(?i)^(https?://)?([a-z0-9-]+\.)+[a-z]{2,}(/.*)?$',
+    ).hasMatch(text.trim());
+    return hasScheme || domainLike;
+  }
+
+  String _normalizeUrl(String text) {
+    final t = text.trim();
+    if (t.startsWith(RegExp(r'(?i)https?://'))) return t;
+    // Si parece dominio, añadimos https:// por defecto
+    if (RegExp(r'(?i)^([a-z0-9-]+\.)+[a-z]{2,}(/.*)?$').hasMatch(t)) {
+      return 'https://$t';
+    }
+    // Si empieza por www., añadimos https://
+    if (t.startsWith(RegExp(r'(?i)^www\.'))) {
+      return 'https://$t';
+    }
+    return t;
+  }
+
+  Future<void> _launchURL(String raw) async {
+    final url = _normalizeUrl(raw);
+    final uri = Uri.tryParse(url);
+    if (uri == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Enlace no válido')),
+        );
+      }
+      return;
+    }
+    final ok = await launchUrl(uri, mode: LaunchMode.platformDefault);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo abrir: $url')),
+      );
+    }
   }
 
   @override
@@ -97,116 +145,121 @@ class _QRScannerPageState extends State<QRScannerPage>
         children: [
           Expanded(
             flex: 4,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                return Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    // Cámara
-                    MobileScanner(
-                      controller: cameraController,
-                      onDetect: (capture) {
-                        final List<Barcode> barcodes = capture.barcodes;
-                        final String? code = barcodes.isNotEmpty
-                            ? barcodes.first.rawValue
-                            : null;
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // Cámara
+                MobileScanner(
+                  controller: cameraController,
+                  onDetect: (capture) {
+                    final List<Barcode> barcodes = capture.barcodes;
+                    final String? code =
+                        barcodes.isNotEmpty ? barcodes.first.rawValue : null;
 
-                        if (!_scanned && code != null) {
-                          setState(() {
-                            _scanned = true;
-                            scannedCode = code;
-                          });
-                          _showAlert(code);
-                        }
-                      },
-                    ),
+                    if (!_scanned && code != null) {
+                      setState(() {
+                        _scanned = true;
+                        scannedCode = code;
+                      });
+                      _showAlert(code);
+                    }
+                  },
+                ),
 
-                    // Overlay oscuro con hueco transparente
-                    CustomPaint(
-                      painter: _ScannerOverlayPainter(
-                        frameSize: _frameSize,
-                        borderRadius: _borderRadius,
-                        strokeColor: Colors.greenAccent,
-                        strokeWidth: 4,
-                        cornerLength: 28,
-                      ),
-                      size: Size.infinite,
-                    ),
+                // Overlay oscuro con hueco transparente + esquinas
+                CustomPaint(
+                  painter: _ScannerOverlayPainter(
+                    frameSize: _frameSize,
+                    borderRadius: _borderRadius,
+                    strokeColor: Colors.greenAccent,
+                    strokeWidth: 4,
+                    cornerLength: 28,
+                  ),
+                  size: Size.infinite,
+                ),
 
-                    // Línea de escaneo animada
-                    Center(
-                      child: SizedBox(
-                        width: _frameSize,
-                        height: _frameSize,
-                        child: AnimatedBuilder(
-                          animation: _lineAnimation,
-                          builder: (context, child) {
-                            final y =
-                                (_frameSize - 4) * _lineAnimation.value; // 4=alto de línea
-                            return Stack(
-                              children: [
-                                Positioned(
-                                  top: y,
-                                  left: 0,
-                                  right: 0,
-                                  child: Container(
-                                    height: 4,
-                                    margin: const EdgeInsets.symmetric(horizontal: 8),
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(2),
-                                      gradient: LinearGradient(
-                                        begin: Alignment.centerLeft,
-                                        end: Alignment.centerRight,
-                                        colors: [
-                                          Colors.transparent,
-                                          theme.colorScheme.secondary.withOpacity(0.9),
-                                          Colors.transparent,
-                                        ],
-                                      ),
-                                    ),
+                // Línea de escaneo animada
+                Center(
+                  child: SizedBox(
+                    width: _frameSize,
+                    height: _frameSize,
+                    child: AnimatedBuilder(
+                      animation: _lineAnimation,
+                      builder: (context, child) {
+                        final y = (_frameSize - 4) * _lineAnimation.value; // 4=alto de línea
+                        return Stack(
+                          children: [
+                            Positioned(
+                              top: y,
+                              left: 0,
+                              right: 0,
+                              child: Container(
+                                height: 4,
+                                margin: const EdgeInsets.symmetric(horizontal: 8),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(2),
+                                  gradient: LinearGradient(
+                                    begin: Alignment.centerLeft,
+                                    end: Alignment.centerRight,
+                                    colors: [
+                                      Colors.transparent,
+                                      theme.colorScheme.secondary.withOpacity(0.9),
+                                      Colors.transparent,
+                                    ],
                                   ),
                                 ),
-                              ],
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-
-                    // Texto guía
-                    Positioned(
-                      bottom: 24,
-                      left: 0,
-                      right: 0,
-                      child: Column(
-                        children: [
-                          Text(
-                            'Alinea el código dentro del recuadro',
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: Colors.white,
-                              shadows: const [
-                                Shadow(blurRadius: 4, color: Colors.black),
-                              ],
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
+                          ],
+                        );
+                      },
                     ),
-                  ],
-                );
-              },
+                  ),
+                ),
+
+                // Texto guía
+                Positioned(
+                  bottom: 24,
+                  left: 0,
+                  right: 0,
+                  child: Text(
+                    'Alinea el código dentro del recuadro',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: Colors.white,
+                      shadows: const [Shadow(blurRadius: 4, color: Colors.black)],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           Expanded(
             flex: 1,
             child: Center(
-              child: Text(
-                scannedCode != null
-                    ? 'Código detectado: $scannedCode'
-                    : 'Escanea un código QR',
-                style: const TextStyle(fontSize: 18),
-              ),
+              child: scannedCode != null
+                  ? _isLikelyUrl(scannedCode!)
+                      ? InkWell(
+                          onTap: () => _launchURL(scannedCode!),
+                          child: Text(
+                            _normalizeUrl(scannedCode!),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              color: Colors.blue,
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
+                        )
+                      : Text(
+                          'Código detectado: $scannedCode',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 18),
+                        )
+                  : const Text(
+                      'Escanea un código QR',
+                      style: TextStyle(fontSize: 18),
+                    ),
             ),
           ),
         ],
@@ -251,35 +304,32 @@ class _ScannerOverlayPainter extends CustomPainter {
     final rrect = RRect.fromRectAndRadius(rect, Radius.circular(borderRadius));
 
     // 1) Capa para poder usar BlendMode.clear
-    final paint = Paint()..color = Colors.black.withOpacity(0.55);
+    final overlayPaint = Paint()..color = Colors.black.withOpacity(0.55);
     canvas.saveLayer(Offset.zero & size, Paint());
 
-    // 2) Pintamos el oscurecido completo
-    canvas.drawRect(Offset.zero & size, paint);
+    // 2) Fondo oscurecido
+    canvas.drawRect(Offset.zero & size, overlayPaint);
 
-    // 3) "Recortamos" el hueco transparente
-    paint.blendMode = BlendMode.clear;
-    canvas.drawRRect(rrect, paint);
+    // 3) Hueco transparente
+    overlayPaint.blendMode = BlendMode.clear;
+    canvas.drawRRect(rrect, overlayPaint);
 
     // 4) Cerramos la capa
     canvas.restore();
 
-    // 5) Dibujamos esquinas del visor
+    // 5) Esquinas del visor
     final cornerPaint = Paint()
       ..color = strokeColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth
       ..strokeCap = StrokeCap.square;
 
-    // Esquinas (4 Ls)
-    // Superior izquierda
     _drawCorner(canvas, cornerPaint, rrect.outerRect.topLeft, Corner.topLeft);
-    // Superior derecha
     _drawCorner(canvas, cornerPaint, rrect.outerRect.topRight, Corner.topRight);
-    // Inferior izquierda
-    _drawCorner(canvas, cornerPaint, rrect.outerRect.bottomLeft, Corner.bottomLeft);
-    // Inferior derecha
-    _drawCorner(canvas, cornerPaint, rrect.outerRect.bottomRight, Corner.bottomRight);
+    _drawCorner(
+        canvas, cornerPaint, rrect.outerRect.bottomLeft, Corner.bottomLeft);
+    _drawCorner(
+        canvas, cornerPaint, rrect.outerRect.bottomRight, Corner.bottomRight);
   }
 
   void _drawCorner(Canvas canvas, Paint paint, Offset origin, Corner corner) {

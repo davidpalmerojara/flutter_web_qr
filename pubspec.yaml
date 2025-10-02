@@ -31,6 +31,7 @@ dependencies:
   flutter:
     sdk: flutter
   mobile_scanner: ^7.1.2
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:
