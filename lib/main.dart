@@ -53,15 +53,33 @@ class _QRViewExampleState extends State<QRViewExample> {
   }
 
   void _onQRViewCreated(QRViewController controller) {
-    this.controller = controller;
-    controller.scannedDataStream.listen((scanData) {
-      if (qrText != scanData.code) {
-        setState(() {
-          qrText = scanData.code;
-        });
-      }
-    });
-  }
+  this.controller = controller;
+  controller.scannedDataStream.listen((scanData) {
+    final code = scanData.code;
+    if (code != null && qrText != code) {
+      setState(() {
+        qrText = code;
+      });
+      // Mostrar alerta con la URL o código leído
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text('Código QR detectado'),
+          content: Text(code),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text('Cerrar'),
+            ),
+          ],
+        ),
+      );
+    }
+  });
+}
+
 
   @override
   void dispose() {
