@@ -29,15 +29,17 @@ class _QRScannerPageState extends State<QRScannerPage>
   final MobileScannerController cameraController = MobileScannerController(
     facing: CameraFacing.back,
     torchEnabled: false,
+    // Si quieres limitar solo a QR:
+    // formats: [BarcodeFormat.qrCode],
   );
 
-  // Evitar múltiples aperturas
-  bool _opening = false;
+  // Evitar múltiples modales a la vez
+  bool _showingDialog = false;
 
-  // Estado flash (visual)
+  // Estado visual del flash
   bool _torchOn = false;
 
-  // Animación opcional de línea de escaneo (simple)
+  // Línea de escaneo (opcional)
   late final AnimationController _lineController =
       AnimationController(vsync: this, duration: const Duration(seconds: 2))
         ..repeat(reverse: true);
@@ -66,53 +68,64 @@ class _QRScannerPageState extends State<QRScannerPage>
     return t;
   }
 
-  Future<void> _openScannedUrl(String raw) async {
-    final normalized = _normalizeUrl(raw);
-    final uri = Uri.tryParse(normalized);
+  Future<void> _openUrl(String raw) async {
+    final uri = Uri.tryParse(_normalizeUrl(raw));
     if (uri == null) return;
+    // No paramos la cámara aquí (solo abrimos si el usuario pulsa).
+    await launchUrl(uri, mode: LaunchMode.platformDefault);
+  }
 
-    // 1) Parar cámara antes de lanzar (evita pantalla gris)
-    try {
-      if (!kIsWeb) await cameraController.stop();
-    } catch (_) {}
+  // ---------- Modal con enlace si es URL ----------
+  Future<void> _showResultDialog(String code) async {
+    if (!mounted) return;
+    setState(() => _showingDialog = true);
 
-    // 2) Abrir navegador/app externa
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final isUrl = _isLikelyUrl(code);
+    final display = isUrl ? _normalizeUrl(code) : code;
 
-    // 3) Reanudar cámara al volver (si quieres seguir escaneando)
-    try {
-      if (!kIsWeb) await cameraController.start();
-    } catch (_) {}
+    await showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => AlertDialog(
+        title: const Text('Código QR detectado'),
+        content: isUrl
+            ? InkWell(
+                onTap: () => _openUrl(code),
+                child: Text(
+                  display,
+                  style: const TextStyle(
+                    color: Colors.blue,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              )
+            : SelectableText(code),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
 
-    if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo abrir: $normalized')),
-      );
+    if (mounted) {
+      setState(() => _showingDialog = false);
     }
   }
 
-  // ---------- onDetect ----------
-  Future<void> _handleDetect(BarcodeCapture capture) async {
-    if (_opening) return;
+  // ---------- onDetect fiable ----------
+  void _handleDetect(BarcodeCapture capture) {
+    // Si ya hay un modal abierto, no hagas nada hasta que se cierre
+    if (_showingDialog) return;
 
     final codes = capture.barcodes;
-    final code = codes.isNotEmpty ? codes.first.rawValue : null;
-    if (code == null) return;
+    final String? code = codes.isNotEmpty ? codes.first.rawValue : null;
 
-    if (!_isLikelyUrl(code)) {
-      // Si quieres abrir cualquier texto como URL, quita este return
-      return;
-    }
+    if (code == null || code.isEmpty) return;
 
-    _opening = true;
-    // Lanzar tras el frame actual para evitar conflictos de render
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      try {
-        await _openScannedUrl(code);
-      } finally {
-        _opening = false;
-      }
-    });
+    // Mostramos SIEMPRE el modal (sea URL o no). Si es URL, habrá un enlace.
+    _showResultDialog(code);
   }
 
   @override
@@ -167,9 +180,10 @@ class _QRScannerPageState extends State<QRScannerPage>
           MobileScanner(
             controller: cameraController,
             onDetect: _handleDetect,
+            fit: BoxFit.cover,
           ),
 
-          // Visor simple con borde + línea animada
+          // Visor con borde + línea animada
           Center(
             child: SizedBox(
               width: _frameSize,
