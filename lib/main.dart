@@ -1,7 +1,9 @@
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:web/web.dart' as web;
+
 
 void main() => runApp(const MyApp());
 
@@ -51,41 +53,14 @@ void _showAlert(String code) {
       content: SelectableText(code),
       actions: [
         // Botón para abrir si es link
-        TextButton(
-  onPressed: () async {
-    // 1) Normalizar el texto del QR
+TextButton(
+  onPressed: () {
     final raw = code.trim();
-    final normalized = raw.contains('://') ? raw : 'https://$raw';
+    final url = raw.contains('://') ? raw : 'https://$raw';
 
-    Uri? uri;
-    try {
-      uri = Uri.parse(normalized);
-    } catch (_) {
-      uri = null;
-    }
-    if (uri == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enlace no válido')),
-      );
-      return;
-    }
+    // Abre en nueva pestaña
+    web.window.open(url, '_blank');
 
-    // 2) IMPORTANTE: lanzar primero (gesto del usuario), cerrar después
-    //    En Web, usa webOnlyWindowName para controlar la pestaña.
-    final ok = await launchUrl(
-      uri,
-      mode: LaunchMode.platformDefault,   // en web será ventana/pestaña del navegador
-      webOnlyWindowName: '_blank',        // '_self' para misma pestaña, '_blank' nueva
-    );
-
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se pudo abrir el enlace')),
-      );
-      return;
-    }
-
-    // 3) Cerrar el diálogo DESPUÉS de lanzar
     Navigator.of(context).pop();
     setState(() => _scanned = false);
   },
