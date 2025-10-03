@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 void main() => runApp(const MyApp());
 
@@ -42,24 +43,41 @@ class _QRScannerPageState extends State<QRScannerPage>
 
   static const double _frameSize = 260;
 
-  void _showAlert(String code) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Código QR detectado'),
-        content: SelectableText(code),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              setState(() => _scanned = false); // permitir nuevo escaneo
-            },
-            child: const Text('Cerrar'),
-          ),
-        ],
-      ),
-    );
-  }
+void _showAlert(String code) {
+  showDialog(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text('Código QR detectado'),
+      content: SelectableText(code),
+      actions: [
+        // Botón para abrir si es link
+        TextButton(
+          onPressed: () async {
+            final Uri uri = Uri.tryParse(code) ?? Uri();
+            if (await canLaunchUrl(uri)) {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            } else {
+              // Si no es URL válida, mostramos un aviso
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('No se pudo abrir el enlace')),
+              );
+            }
+          },
+          child: const Text('Abrir enlace'),
+        ),
+        // Botón de cerrar
+        TextButton(
+          onPressed: () {
+            Navigator.of(context).pop();
+            setState(() => _scanned = false); // permitir nuevo escaneo
+          },
+          child: const Text('Cerrar'),
+        ),
+      ],
+    ),
+  );
+}
+
 
   void _handleDetect(BarcodeCapture capture) {
     if (_scanned) return;
