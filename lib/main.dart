@@ -52,19 +52,46 @@ void _showAlert(String code) {
       actions: [
         // Botón para abrir si es link
         TextButton(
-          onPressed: () async {
-            final Uri uri = Uri.tryParse(code) ?? Uri();
-            if (await canLaunchUrl(uri)) {
-              await launchUrl(uri, mode: LaunchMode.externalApplication);
-            } else {
-              // Si no es URL válida, mostramos un aviso
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('No se pudo abrir el enlace')),
-              );
-            }
-          },
-          child: const Text('Abrir enlace'),
-        ),
+  onPressed: () async {
+    // 1) Normalizar el texto del QR
+    final raw = code.trim();
+    final normalized = raw.contains('://') ? raw : 'https://$raw';
+
+    Uri? uri;
+    try {
+      uri = Uri.parse(normalized);
+    } catch (_) {
+      uri = null;
+    }
+    if (uri == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enlace no válido')),
+      );
+      return;
+    }
+
+    // 2) IMPORTANTE: lanzar primero (gesto del usuario), cerrar después
+    //    En Web, usa webOnlyWindowName para controlar la pestaña.
+    final ok = await launchUrl(
+      uri,
+      mode: LaunchMode.platformDefault,   // en web será ventana/pestaña del navegador
+      webOnlyWindowName: '_blank',        // '_self' para misma pestaña, '_blank' nueva
+    );
+
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir el enlace')),
+      );
+      return;
+    }
+
+    // 3) Cerrar el diálogo DESPUÉS de lanzar
+    Navigator.of(context).pop();
+    setState(() => _scanned = false);
+  },
+  child: const Text('Abrir enlace'),
+),
+
         // Botón de cerrar
         TextButton(
           onPressed: () {
