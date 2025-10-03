@@ -54,12 +54,13 @@ void _showAlert(String code) {
       actions: [
         // Botón para abrir si es link
 TextButton(
-  onPressed: () {
+  onPressed: () async {
     final raw = code.trim();
     final url = raw.contains('://') ? raw : 'https://$raw';
+    final uri = Uri.parse(url);
 
-    // Abre en nueva pestaña
-    web.window.open(url, '_blank');
+    // En web abre en otra pestaña automáticamente
+    await launchUrl(uri, webOnlyWindowName: '_blank');
 
     Navigator.of(context).pop();
     setState(() => _scanned = false);
